@@ -1,7 +1,6 @@
-import React, { useState } from 'react';
+import { useEffect, useState } from 'react';
 import axios from 'axios';
 import { BrowserRouter as Router, Route, Routes, Navigate, useNavigate } from 'react-router-dom';
-import { LogIn, UserPlus, CheckCircle, Circle, Trash2, LogOut, Plus } from 'lucide-react';
 
 const API_URL = 'http://localhost:5000';
 
@@ -17,6 +16,18 @@ api.interceptors.request.use(config => {
   return config;
 });
 
+async function fetchTasks(setTasks, setToken) {
+  try {
+    const res = await api.get('/tasks');
+    setTasks(res.data);
+  } catch (error) {
+    if (error.response?.status === 401) {
+      setToken(null);
+      localStorage.removeItem('token');
+    }
+  }
+}
+
 function Login({ setToken }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -29,7 +40,7 @@ function Login({ setToken }) {
       localStorage.setItem('token', res.data.token);
       setToken(res.data.token);
       navigate('/');
-    } catch (err) {
+    } catch {
       alert('Login failed');
     }
   };
@@ -47,7 +58,7 @@ function Login({ setToken }) {
   );
 }
 
-function Register({ setToken }) {
+function Register() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const navigate = useNavigate();
@@ -57,7 +68,7 @@ function Register({ setToken }) {
     try {
       await api.post('/auth/register', { username, password });
       navigate('/login');
-    } catch (err) {
+    } catch {
       alert('Registration failed');
     }
   };
@@ -79,21 +90,9 @@ function Dashboard({ token, setToken }) {
   const [tasks, setTasks] = useState([]);
   const [title, setTitle] = useState('');
 
-  React.useEffect(() => {
-    if (token) fetchTasks();
-  }, [token]);
-
-  const fetchTasks = async () => {
-    try {
-      const res = await api.get('/tasks');
-      setTasks(res.data);
-    } catch (err) {
-      if (err.response?.status === 401) {
-        setToken(null);
-        localStorage.removeItem('token');
-      }
-    }
-  };
+  useEffect(() => {
+    if (token) void fetchTasks(setTasks, setToken);
+  }, [token, setToken]);
 
   const addTask = async (e) => {
     e.preventDefault();
@@ -101,27 +100,27 @@ function Dashboard({ token, setToken }) {
     try {
       await api.post('/tasks', { title });
       setTitle('');
-      fetchTasks();
-    } catch (err) {
-      console.error(err);
+      void fetchTasks(setTasks, setToken);
+    } catch (error) {
+      console.error(error);
     }
   };
 
   const toggleTask = async (id, is_complete) => {
     try {
       await api.patch(`/tasks/${id}`, { is_complete: !is_complete });
-      fetchTasks();
-    } catch (err) {
-      console.error(err);
+      void fetchTasks(setTasks, setToken);
+    } catch (error) {
+      console.error(error);
     }
   };
 
   const deleteTask = async (id) => {
     try {
       await api.delete(`/tasks/${id}`);
-      fetchTasks();
-    } catch (err) {
-      console.error(err);
+      void fetchTasks(setTasks, setToken);
+    } catch (error) {
+      console.error(error);
     }
   };
 
@@ -170,7 +169,7 @@ export default function App() {
     <Router>
       <Routes>
         <Route path="/login" element={token ? <Navigate to="/" /> : <Login setToken={setToken} />} />
-        <Route path="/register" element={token ? <Navigate to="/" /> : <Register setToken={setToken} />} />
+        <Route path="/register" element={token ? <Navigate to="/" /> : <Register />} />
         <Route path="/" element={token ? <Dashboard token={token} setToken={setToken} /> : <Navigate to="/login" />} />
       </Routes>
     </Router>

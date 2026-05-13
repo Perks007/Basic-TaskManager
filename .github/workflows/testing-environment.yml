@@ -1,0 +1,140 @@
+name: Testing Environment Pipeline
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: testing-environment-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  TESTING_APP_URL: ${{ secrets.TESTING_APP_URL }}
+  TESTING_DEPLOY_PATH: ${{ secrets.TESTING_DEPLOY_PATH }}
+  TESTING_SSH_HOST: ${{ secrets.TESTING_SSH_HOST }}
+  TESTING_SSH_KEY: ${{ secrets.TESTING_SSH_KEY }}
+  TESTING_SSH_PORT: ${{ secrets.TESTING_SSH_PORT || 22 }}
+  TESTING_SSH_USER: ${{ secrets.TESTING_SSH_USER }}
+
+jobs:
+  pipeline:
+    name: Build, test, lint, and deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend source
+        working-directory: frontend
+        run: npm run build
+
+      - name: Run backend unit tests
+        working-directory: backend
+        run: npm test
+
+      - name: Run frontend lint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Package deployment artifacts
+        run: |
+          tar --exclude='backend/node_modules' \
+              --exclude='backend/.env' \
+              --exclude='frontend/node_modules' \
+              --exclude='frontend/.env' \
+              -czf deployment.tar.gz backend frontend/dist schema.sql
+
+      - name: Prepare SSH access
+        run: |
+          mkdir -p "$HOME/.ssh"
+          printf '%s\n' "${TESTING_SSH_KEY}" > "$HOME/.ssh/testing_key"
+          chmod 600 "$HOME/.ssh/testing_key"
+          ssh-keyscan -p "$TESTING_SSH_PORT" -H "$TESTING_SSH_HOST" >> "$HOME/.ssh/known_hosts"
+
+      - name: Create remote deploy directory
+        run: |
+          ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" "mkdir -p '$TESTING_DEPLOY_PATH'"
+
+      - name: Upload deployment archive
+        run: |
+          scp -i "$HOME/.ssh/testing_key" -P "$TESTING_SSH_PORT" deployment.tar.gz "$TESTING_SSH_USER@$TESTING_SSH_HOST:$TESTING_DEPLOY_PATH/deployment.tar.gz"
+
+      - name: Deploy to AWS testing server
+        run: |
+          ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" "set -e; cd '$TESTING_DEPLOY_PATH'; tar -xzf deployment.tar.gz; cd backend; npm ci --omit=dev; pkill -f 'node index.js' || true; nohup npm start > app.log 2>&1 &"
+
+  notify_success:
+    name: Email QA on success
+    needs: pipeline
+    if: success()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send success email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: Testing deployment succeeded for ${{ github.repository }}
+          to: ${{ secrets.QA_EMAIL }}
+          from: ${{ secrets.MAIL_FROM }}
+          body: |
+            The testing workflow completed successfully.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Access the app here: ${{ env.TESTING_APP_URL }}
+
+  notify_failure:
+    name: Email developer on failure
+    needs: pipeline
+    if: failure()
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send failure email
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: ${{ secrets.MAIL_SERVER }}
+          server_port: ${{ secrets.MAIL_PORT }}
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: Testing deployment failed for ${{ github.repository }}
+          to: ${{ secrets.DEV_EMAIL }}
+          from: ${{ secrets.MAIL_FROM }}
+          body: |
+            The testing workflow failed.
+
+            Repository: ${{ github.repository }}
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

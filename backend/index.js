@@ -4,6 +4,7 @@ const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 require('dotenv').config();
 const db = require('./db');
+const { extractBearerToken } = require('./auth');
 
 const app = express();
 app.use(cors());
@@ -13,7 +14,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'secret';
 
 // Middleware to verify JWT
 const auth = (req, res, next) => {
-  const token = req.header('Authorization')?.replace('Bearer ', '');
+  const token = extractBearerToken(req.header('Authorization'));
   if (!token) return res.status(401).json({ error: 'Access denied' });
   try {
     const verified = jwt.verify(token, JWT_SECRET);
