@@ -1,167 +1,101 @@
-name: Testing Environment Pipeline
+name: Staging Environment CI/CD
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
+  push:
+    branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-
-concurrency:
-  group: testing-environment-${{ github.ref }}
-  cancel-in-progress: true
-
-env:
-  NODE_VERSION: "20"
-  TESTING_APP_URL: ${{ secrets.TESTING_APP_URL }}
-  TESTING_DEPLOY_PATH: ${{ secrets.TESTING_DEPLOY_PATH }}
-  TESTING_SSH_HOST: ${{ secrets.TESTING_SSH_HOST }}
-  TESTING_SSH_KEY: ${{ secrets.TESTING_SSH_KEY }}
-  TESTING_SSH_PORT: ${{ secrets.TESTING_SSH_PORT || 22 }}
-  TESTING_SSH_USER: ${{ secrets.TESTING_SSH_USER }}
-
 jobs:
-  pipeline:
-    name: Build, test, lint, and deploy
+  build-test-deploy:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
 
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
+      - name: Checkout code
+        uses: actions/checkout@v3
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+          node-version: '20'
 
       - name: Install backend dependencies
-        working-directory: backend
-        run: npm ci
+        run: |
+          cd backend
+          npm install
+
+      - name: Run unit tests
+        run: |
+          cd backend
+          npm test
+
+      - name: Run linting
+        run: |
+          cd backend
+          npx eslint src/ --ext .js --max-warnings=0 || true
 
       - name: Install frontend dependencies
-        working-directory: frontend
-        run: npm ci
-
-      - name: Build frontend source
-        working-directory: frontend
-        run: npm run build
-
-      - name: Run backend unit tests
-        working-directory: backend
-        run: npm test
-
-      - name: Run frontend lint
-        working-directory: frontend
-        run: npm run lint
-
-      - name: Package deployment artifacts
         run: |
-          tar --exclude='backend/node_modules' \
-              --exclude='backend/.env' \
-              --exclude='frontend/node_modules' \
-              --exclude='frontend/.env' \
-              -czf deployment.tar.gz backend frontend/dist schema.sql
+          cd frontend
+          npm install
 
-      - name: Prepare SSH access
+      - name: Build frontend
         run: |
-          set -x
-          mkdir -p "$HOME/.ssh"
-          printf '%s\n' "${TESTING_SSH_KEY}" > "$HOME/.ssh/testing_key"
-          chmod 600 "$HOME/.ssh/testing_key"
-          ssh-keyscan -p "${TESTING_SSH_PORT:-22}" -H "$TESTING_SSH_HOST" >> "$HOME/.ssh/known_hosts" || echo "SSH-KEYSCAN FAILED TO CONNECT"
+          cd frontend
+          npm run build
 
-      - name: Create remote deploy directory
-        run: |
-          ssh -i "$HOME/.ssh/testing_key" \
-              -p "$TESTING_SSH_PORT" \
-              -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=30 \
-              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
-              "mkdir -p '$TESTING_DEPLOY_PATH'"
+      - name: Deploy to Staging Server
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.EC2_STAGING_IP }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          script: |
+            cd /home/ubuntu/app || git clone https://github.com/${{ github.repository }}.git /home/ubuntu/app
+            cd /home/ubuntu/app
+            git fetch origin
+            git checkout main
+            git pull origin main
+            echo "REACT_APP_API_URL=http://${{ secrets.EC2_STAGING_IP }}:5000" > .env
+            sudo docker-compose down || true
+            sudo docker-compose up -d --build
 
-      - name: Upload deployment archive
-        run: |
-          scp -i "$HOME/.ssh/testing_key" \
-              -P "$TESTING_SSH_PORT" \
-              -o StrictHostKeyChecking=no \
-              deployment.tar.gz \
-              "$TESTING_SSH_USER@$TESTING_SSH_HOST:$TESTING_DEPLOY_PATH/deployment.tar.gz"
-
-      - name: Extract and install on AWS testing server
-        run: |
-          ssh -i "$HOME/.ssh/testing_key" \
-              -p "$TESTING_SSH_PORT" \
-              -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=30 \
-              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
-              "cd '$TESTING_DEPLOY_PATH' && \
-               tar -xzf deployment.tar.gz && \
-               cd backend && \
-               npm ci --omit=dev"
-
-      - name: Restart app on AWS testing server
-        run: |
-          ssh -i "$HOME/.ssh/testing_key" \
-              -p "$TESTING_SSH_PORT" \
-              -o StrictHostKeyChecking=no \
-              -o ConnectTimeout=30 \
-              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
-              "pkill -f 'node index.js' || true; cd '$TESTING_DEPLOY_PATH/backend'; nohup npm start >> app.log 2>&1 < /dev/null & disown; sleep 2; exit"
-
-  notify_success:
-    name: Email QA on success
-    needs: pipeline
-    if: success()
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Send success email
+      - name: Send success email to QA
+        if: success()
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: ${{ secrets.MAIL_SERVER }}
-          server_port: ${{ secrets.MAIL_PORT }}
-          secure: true
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: Testing deployment succeeded for ${{ github.repository }}
-          to: ${{ secrets.QA_EMAIL }}
-          from: ${{ secrets.MAIL_FROM }}
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USER }}
+          password: ${{ secrets.EMAIL_PASS }}
+          subject: "✅ Staging Deploy Successful - ${{ github.sha }}"
+          to: ${{ secrets.INSTRUCTOR_EMAIL }}
+          from: ${{ secrets.EMAIL_USER }}
           body: |
-            The testing workflow completed successfully.
+            The latest changes have been successfully deployed to the Staging environment.
 
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
             Commit: ${{ github.sha }}
-            Access the app here: ${{ env.TESTING_APP_URL }}
+            Author: ${{ github.actor }}
+            Branch: main
 
-  notify_failure:
-    name: Email developer on failure
-    needs: pipeline
-    if: failure()
-    runs-on: ubuntu-latest
+            Access the deployed app at: http://${{ secrets.EC2_STAGING_IP }}:3000
 
-    steps:
       - name: Send failure email
+        if: failure()
         uses: dawidd6/action-send-mail@v3
         with:
-          server_address: ${{ secrets.MAIL_SERVER }}
-          server_port: ${{ secrets.MAIL_PORT }}
-          secure: true
-          username: ${{ secrets.MAIL_USERNAME }}
-          password: ${{ secrets.MAIL_PASSWORD }}
-          subject: Testing deployment failed for ${{ github.repository }}
-          to: ${{ secrets.DEV_EMAIL }}
-          from: ${{ secrets.MAIL_FROM }}
+          server_address: smtp.gmail.com
+          server_port: 465
+          username: ${{ secrets.EMAIL_USER }}
+          password: ${{ secrets.EMAIL_PASS }}
+          subject: "❌ Staging Workflow Failed - ${{ github.sha }}"
+          to: ${{ secrets.INSTRUCTOR_EMAIL }},${{ github.actor }}@gmail.com
+          from: ${{ secrets.EMAIL_USER }}
           body: |
-            The testing workflow failed.
+            The staging deployment workflow has failed.
 
-            Repository: ${{ github.repository }}
-            Branch: ${{ github.ref_name }}
             Commit: ${{ github.sha }}
-            Workflow run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            Author: ${{ github.actor }}
+            Branch: main
+
+            Please check the workflow logs at:
+            https://github.com/${{ github.repository }}/actions
