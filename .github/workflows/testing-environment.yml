@@ -107,7 +107,8 @@ jobs:
               "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
               "pkill -f 'node index.js' || true; \
                cd '$TESTING_DEPLOY_PATH/backend' && \
-               nohup npm start > app.log 2>&1 < /dev/null &"
+               nohup npm start > app.log 2>&1 < /dev/null & \
+               sleep 1 && echo 'App started'"
 
   notify_success:
     name: Email QA on success
