@@ -122,7 +122,7 @@ jobs:
               -o StrictHostKeyChecking=no \
               -o ConnectTimeout=30 \
               "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
-              "pkill -f 'node index.js' 2>/dev/null; cd $TESTING_DEPLOY_PATH/backend && nohup npm start >> app.log 2>&1 < /dev/null &"
+              "pkill -f 'node index.js' || true; cd '$TESTING_DEPLOY_PATH/backend'; ((nohup node index.js >> app.log 2>&1 < /dev/null &) &); sleep 1"
 
   notify_success:
     name: Email QA on success
