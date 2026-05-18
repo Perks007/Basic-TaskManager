@@ -87,7 +87,7 @@ jobs:
 
       - name: Deploy to AWS testing server
         run: |
-          ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" "set -e; cd '$TESTING_DEPLOY_PATH'; tar -xzf deployment.tar.gz; cd backend; npm ci --omit=dev; pkill -f 'node index.js' || true; nohup npm start > app.log 2>&1 &"
+          ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" "set -e; cd '$TESTING_DEPLOY_PATH'; tar -xzf deployment.tar.gz; cd backend; npm ci --omit=dev; pkill -f 'node index.js' || true; nohup npm start > app.log 2>&1 < /dev/null & sleep 2"
 
   notify_success:
     name: Email QA on success
