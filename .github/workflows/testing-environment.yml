@@ -80,6 +80,8 @@ jobs:
         run: |
           ssh -i "$HOME/.ssh/testing_key" \
               -p "$TESTING_SSH_PORT" \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
               "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
               "mkdir -p '$TESTING_DEPLOY_PATH'"
 
@@ -87,6 +89,7 @@ jobs:
         run: |
           scp -i "$HOME/.ssh/testing_key" \
               -P "$TESTING_SSH_PORT" \
+              -o StrictHostKeyChecking=no \
               deployment.tar.gz \
               "$TESTING_SSH_USER@$TESTING_SSH_HOST:$TESTING_DEPLOY_PATH/deployment.tar.gz"
 
@@ -94,6 +97,8 @@ jobs:
         run: |
           ssh -i "$HOME/.ssh/testing_key" \
               -p "$TESTING_SSH_PORT" \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
               "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
               "cd '$TESTING_DEPLOY_PATH' && \
                tar -xzf deployment.tar.gz && \
@@ -104,11 +109,10 @@ jobs:
         run: |
           ssh -i "$HOME/.ssh/testing_key" \
               -p "$TESTING_SSH_PORT" \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
               "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
-              "pkill -f 'node index.js' || true; \
-               cd '$TESTING_DEPLOY_PATH/backend' && \
-               nohup npm start > app.log 2>&1 < /dev/null & \
-               sleep 1 && echo 'App started'"
+              "pkill -f 'node index.js' 2>/dev/null; bash -c 'cd $TESTING_DEPLOY_PATH/backend && nohup npm start >> app.log 2>&1 < /dev/null &'"
 
   notify_success:
     name: Email QA on success
