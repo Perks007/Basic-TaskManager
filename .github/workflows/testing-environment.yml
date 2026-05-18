@@ -70,34 +70,44 @@ jobs:
 
       - name: Prepare SSH access
         run: |
-          set -x # This prints every command to the logs before executing it
+          set -x
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "${TESTING_SSH_KEY}" > "$HOME/.ssh/testing_key"
           chmod 600 "$HOME/.ssh/testing_key"
-
-          # Force the keyscan to run and print errors even if it fails
           ssh-keyscan -p "${TESTING_SSH_PORT:-22}" -H "$TESTING_SSH_HOST" >> "$HOME/.ssh/known_hosts" || echo "SSH-KEYSCAN FAILED TO CONNECT"
+
       - name: Create remote deploy directory
         run: |
-          ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" "mkdir -p '$TESTING_DEPLOY_PATH'"
+          ssh -i "$HOME/.ssh/testing_key" \
+              -p "$TESTING_SSH_PORT" \
+              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
+              "mkdir -p '$TESTING_DEPLOY_PATH'"
 
       - name: Upload deployment archive
         run: |
-          scp -i "$HOME/.ssh/testing_key" -P "$TESTING_SSH_PORT" deployment.tar.gz "$TESTING_SSH_USER@$TESTING_SSH_HOST:$TESTING_DEPLOY_PATH/deployment.tar.gz"
+          scp -i "$HOME/.ssh/testing_key" \
+              -P "$TESTING_SSH_PORT" \
+              deployment.tar.gz \
+              "$TESTING_SSH_USER@$TESTING_SSH_HOST:$TESTING_DEPLOY_PATH/deployment.tar.gz"
 
-      - name: Deploy to AWS testing server
+      - name: Extract and install on AWS testing server
         run: |
-          ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
-            "set -e
-             cd '$TESTING_DEPLOY_PATH'
-             tar -xzf deployment.tar.gz
-             cd backend
-             npm ci --omit=dev
-             pkill -f 'node index.js' || true
-             nohup npm start > app.log 2>&1 < /dev/null &
-             disown
-             sleep 2
-             exit 0"
+          ssh -i "$HOME/.ssh/testing_key" \
+              -p "$TESTING_SSH_PORT" \
+              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
+              "cd '$TESTING_DEPLOY_PATH' && \
+               tar -xzf deployment.tar.gz && \
+               cd backend && \
+               npm ci --omit=dev"
+
+      - name: Restart app on AWS testing server
+        run: |
+          ssh -i "$HOME/.ssh/testing_key" \
+              -p "$TESTING_SSH_PORT" \
+              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
+              "pkill -f 'node index.js' || true; \
+               cd '$TESTING_DEPLOY_PATH/backend' && \
+               nohup npm start > app.log 2>&1 < /dev/null &"
 
   notify_success:
     name: Email QA on success
