@@ -105,6 +105,16 @@ jobs:
                cd backend && \
                npm ci --omit=dev"
 
+      - name: Test SSH connection
+        run: |
+          ssh -i "$HOME/.ssh/testing_key" \
+              -p "$TESTING_SSH_PORT" \
+              -o StrictHostKeyChecking=no \
+              -o ConnectTimeout=30 \
+              -v \
+              "$TESTING_SSH_USER@$TESTING_SSH_HOST" \
+              "echo connected"
+
       - name: Restart app on AWS testing server
         run: |
           ssh -i "$HOME/.ssh/testing_key" \
