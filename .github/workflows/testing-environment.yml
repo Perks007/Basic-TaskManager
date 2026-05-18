@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  NODE_VERSION: "20"
   TESTING_APP_URL: ${{ secrets.TESTING_APP_URL }}
   TESTING_DEPLOY_PATH: ${{ secrets.TESTING_DEPLOY_PATH }}
   TESTING_SSH_HOST: ${{ secrets.TESTING_SSH_HOST }}
@@ -70,11 +70,13 @@ jobs:
 
       - name: Prepare SSH access
         run: |
+          set -x # This prints every command to the logs before executing it
           mkdir -p "$HOME/.ssh"
           printf '%s\n' "${TESTING_SSH_KEY}" > "$HOME/.ssh/testing_key"
           chmod 600 "$HOME/.ssh/testing_key"
-          ssh-keyscan -p "$TESTING_SSH_PORT" -H "$TESTING_SSH_HOST" >> "$HOME/.ssh/known_hosts"
 
+          # Force the keyscan to run and print errors even if it fails
+          ssh-keyscan -p "${TESTING_SSH_PORT:-22}" -H "$TESTING_SSH_HOST" >> "$HOME/.ssh/known_hosts" || echo "SSH-KEYSCAN FAILED TO CONNECT"
       - name: Create remote deploy directory
         run: |
           ssh -i "$HOME/.ssh/testing_key" -p "$TESTING_SSH_PORT" "$TESTING_SSH_USER@$TESTING_SSH_HOST" "mkdir -p '$TESTING_DEPLOY_PATH'"
